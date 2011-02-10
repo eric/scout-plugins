@@ -11,12 +11,14 @@ class NetworkThroughput < Scout::Plugin
       next unless iface =~ /eth/
       cols = rest.split(/\s+/)
 
-      in_bytes, in_packets, out_bytes, out_packets = cols.values_at(0, 1, 8, 9).collect { |i| i.to_i }
+      in_bytes, in_packets, in_errs, out_bytes, out_packets, out_errs = cols.values_at(0, 1, 2, 8, 9, 10).collect { |i| i.to_i }
 
       local_counter("#{iface}_in",          in_bytes / 1024.0,  :per => :second, :round => 2)
       local_counter("#{iface}_in_packets",  in_packets,         :per => :second, :round => 2)
+      local_counter("#{iface}_in_errors",   in_errs,            :per => :second, :round => 2)
       local_counter("#{iface}_out",         out_bytes / 1024.0, :per => :second, :round => 2)
       local_counter("#{iface}_out_packets", out_packets,        :per => :second, :round => 2)
+      local_counter("#{iface}_out_errors",  out_errs,           :per => :second, :round => 2)
     end
   rescue Exception => e
     error("#{e.class}: #{e.message}\n\t#{e.backtrace.join("\n\t")}")
