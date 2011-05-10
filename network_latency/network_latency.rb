@@ -16,13 +16,17 @@ class NetworkLatency < Scout::Plugin
   def build_report
     measurement = measure_latency(option(:host) || default_gateway)
 
-    report :packet_loss => measurement[:packet_loss], :average => measurement[:avg]
+    if measurement
+      report :packet_loss => measurement[:packet_loss], :average => measurement[:avg]
+    end
   end
 
   def measure_latency(host)
     count = option(:count) || 5
     ping = %x{/bin/ping -c #{count} -i 0.2 -q #{host}}
     ping = %x{/bin/ping -c #{count} -q #{host}} unless $?.success?
+
+    return unless $?.success?
 
     result = {}
     result[:packet_loss] = ping[/([\d\.]+)% packet loss/, 1].to_f
