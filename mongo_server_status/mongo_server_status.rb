@@ -14,24 +14,54 @@ class MongoServerStatus < Scout::Plugin
       name: Port
       default: 27017
       notes: MongoDB standard port is 27017.
+    ssl:
+      name: SSL
+      default: false
+      notes: Specify 'true' if your MongoDB is using SSL for client authentication.
+      attributes: advanced
+    connect_timeout:
+      name: Connect Timeout
+      notes: The number of seconds to wait before timing out a connection attempt.
+      default: 30
+      attributes: advanced
+    op_timeout:
+      name: Operation Timeout
+      notes: The number of seconds to wait for a read operation to time out. Disabled by default.
+      attributes: advanced
   EOS
 
   needs 'mongo', 'yaml'
+
+  def option_to_f(op_name)
+    opt = option(op_name)
+    opt.nil? ? opt : opt.to_f
+  end
 
   def build_report 
     # check if options provided
     @host     = option('host') 
     @port     = option('port')
+    @ssl      = option("ssl").to_s.strip == 'true'
     if [@host,@port].compact.size < 2
       return error("Connection settings not provided.", "The host and port must be provided in the advanced settings.")
     end
     @username = option('username')
     @password = option('password')
+    @connect_timeout = option_to_f('connect_timeout')
+    @op_timeout      = option_to_f('op_timeout')
     
+    if(Mongo::constants.include?(:VERSION) && Mongo::VERSION.split(':').first.to_i >= 2)
+      get_server_status_v2
+    else
+      get_server_status_v1
+    end
+  end
+
+  def get_server_status_v1
     begin
-      connection = Mongo::Connection.new(@host,@port,:slave_ok=>true)
+      connection = Mongo::Connection.new(@host,@port,:ssl=>@ssl,:slave_ok=>true,:connect_timeout=>@connect_timeout,:op_timeout=>@op_timeout)
     rescue Mongo::ConnectionFailure
-      return error("Unable to connect to the MongoDB Daemon.","Please ensure it is running on #{@host}:#{@port}\n\nException Message: #{$!.message}")
+      return error("Unable to connect to the MongoDB Daemon.","Please ensure it is running on #{@host}:#{@port}\n\nException Message: #{$!.message}. Also confirm if SSL should be enabled or disabled.")
     end
     
     # Try to connect to the database
@@ -42,12 +72,20 @@ class MongoServerStatus < Scout::Plugin
       return error("Unable to authenticate to MongoDB Database.",$!.message)
     end
     
-    get_server_status
+    stats = @admin_db.command('serverStatus' => 1)
+    get_server_status(stats)
+  end
+
+  def get_server_status_v2
+    client = Mongo::Client.new(["#{@host}:#{@port}"], :database => 'admin', :ssl => @ssl, :connection_timeout => @connect_timeout, :socket_timeout => @op_timeout, :server_selection_timeout => 1, :connect => :direct)
+    client = client.with(user: @username, password: @password) unless @username.nil?
+    stats = client.database.command(:serverStatus => 1).first
+    get_server_status(stats)
+  rescue Mongo::Error::NoServerAvailable
+    return error("Unable to connect to the MongoDB Daemon.","Please ensure it is running on #{@host}:#{@port}\n\nException Message: #{$!.message}, also confirm if SSL should be enabled or disabled.")
   end
   
-  def get_server_status
-    stats = @admin_db.command('serverStatus' => 1)
-    
+  def get_server_status(stats)
     if stats['indexCounters'] and stats['indexCounters']['btree']
       counter(:btree_accesses, stats['indexCounters']['btree']['accesses'], :per => :second)
     

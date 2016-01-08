@@ -1,13 +1,13 @@
 metadata:
   size_of_indices:
-    label: Total size of the indices
+    label: Indices Size
     units: MB
     precision: "0"
   num_docs:
-    label: Number of indexed documents
+    label: Indexed documents
     precision: "0"
   open_file_descriptors:
-    label: Number of opened file descriptors
+    label: Opened file descriptors
     precision: "0"
   heap_used:
     label: Heap used
@@ -38,5 +38,17 @@ metadata:
     precision: "0"
   gc_cms_collection_time:
     label: GC - ConcurrentMarkSweep
+    units: ms
+    precision: "0"
+  gc_young_collection_time:
+    label: GC - Young
+    units: ms
+    precision: "0"
+  gc_old_collection_time:
+    label: GC - Old
+    units: ms
+    precision: "0"
+  gc_survivor_collection_time:
+    label: GC - Survivor
     units: ms
     precision: "0"

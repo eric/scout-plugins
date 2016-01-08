@@ -1,38 +1,48 @@
 require File.expand_path('../../test_helper.rb', __FILE__)
-require File.expand_path('../elasticsearch_cluster_node_status.rb', __FILE__)
+require File.expand_path('../elasticsearch_node_status.rb', __FILE__)
 
 require 'open-uri'
 class ElasticsearchClusterNodeStatusTest < Test::Unit::TestCase
   def setup
     @node_name = 'es_db0'
-    @options=parse_defaults("elasticsearch_cluster_node_status")
+    @options=parse_defaults("elasticsearch_node_status")
     setup_urls
   end
   
   def teardown
     FakeWeb.clean_registry    
   end
+
+  def test_bad_host
+    plugin = ElasticsearchClusterNodeStatus.new(nil,{},@options.merge(:elasticsearch_host=>'bad'))
+    res = plugin.run
+    e = res[:errors].first
+    assert e[:body].include?("bad")
+  end
   
   def test_initial_run
     @plugin = ElasticsearchClusterNodeStatus.new(nil,{},@options.merge(:node_name=>@node_name))
-    @res = @plugin.run()
-    assert_equal 225, @res[:memory]["gc_collection_time"]
-    assert_equal 10, @res[:memory]["gc_collection_count"]
-    assert_equal 60, @res[:memory]["gc_parnew_collection_time"]
-    assert_equal 9, @res[:memory]["gc_parnew_collection_count"]
-    assert_equal 165, @res[:memory]["gc_cms_collection_time"]
-    assert_equal 1, @res[:memory]["gc_cms_collection_count"]
+    @res = @plugin.run
+    assert @res[:errors].empty?, "Error: #{@res[:errors].inspect}"
+    assert_not_nil @res[:memory]["gc_collection_time"]
+    assert_not_nil @res[:memory]["gc_collection_count"]
+    assert_not_nil @res[:memory]["gc_parnew_collection_time"]
+    assert_not_nil @res[:memory]["gc_parnew_collection_count"]
+    assert_not_nil @res[:memory]["gc_cms_collection_time"]
+    assert_not_nil @res[:memory]["gc_cms_collection_count"]
   end
   
   def test_second_run
     test_initial_run
     @plugin = ElasticsearchClusterNodeStatus.new(nil,@res[:memory],@options.merge(:node_name=>@node_name))
     res = @plugin.run
-    # values for times and counts are 2x the initial run in the fixture data
-    assert_equal (res[:memory]["gc_collection_time"]-@res[:memory]["gc_collection_time"]).to_f/(res[:memory]["gc_collection_count"]-@res[:memory]["gc_collection_count"]),
-                 res[:reports].find { |r| r.keys.include?(:gc_collection_time) }.values.first
     # should report gc time now
     assert_equal 3, res[:reports].size - @res[:reports].size
+  end
+
+  def test_node_name_default
+    @plugin = ElasticsearchClusterNodeStatus.new(nil,{},@options.merge(:node_name => nil))
+    assert_equal '_local', @plugin.node_name
   end
   
   ###############
@@ -40,11 +50,17 @@ class ElasticsearchClusterNodeStatusTest < Test::Unit::TestCase
   ###############
   
   def setup_urls
-      uri="http://127.0.0.1:9200/_cluster/nodes/#{@node_name}/stats?all=true"
+      uri="http://127.0.0.1:9200/_nodes/#{@node_name}/stats?all=true"
       FakeWeb.register_uri(:get, uri, 
         [
          {:body => FIXTURES[:initial]},
          {:body => FIXTURES[:second_run]}
+        ]
+      )
+      uri="http://127.0.0.1:9200/"
+      FakeWeb.register_uri(:get, uri, 
+        [
+         {:body => FIXTURES[:version]}
         ]
       )
   end
@@ -54,6 +70,19 @@ class ElasticsearchClusterNodeStatusTest < Test::Unit::TestCase
   ################
   
   FIXTURES=YAML.load(<<-EOS)
+    :version: |
+      {
+        "status" : 200,
+        "name" : "Crimson Cowl",
+        "version" : {
+          "number" : "1.3.2",
+          "build_hash" : "dee175dbe2f254f3f26992f5d7591939aaefd12f",
+          "build_timestamp" : "2014-08-13T14:29:30Z",
+          "build_snapshot" : false,
+          "lucene_version" : "4.9"
+        },
+        "tagline" : "You Know, for Search"
+      }
     :initial: |
       {
         "cluster_name" : "elasticsearch",
