@@ -29,38 +29,59 @@ class MysqlReplicationMonitor < Scout::Plugin
     name: Ignore Window End
     notes: Time to resume alerting on replication failure. For Example,  2:00am
     default:
+  alert_threshold:
+    name: Alert Threshold
+    notes: Number of checks to perform before alerting that replication is down.
+    default: 2
   EOS
 
   attr_accessor :connection
 
   def build_report
+    res = { "Replication Running" => 0 }
+    
+    down_at = memory(:down_at)
+    consecutive_failures = memory(:consecutive_failures) || 0
+    alert_threshold = (option(:alert_threshold) || 2).to_i
+    
     begin
       self.connection = Mysql.new(option(:host), option(:username), option(:password), nil, option(:port).to_i)
       h = connection.query("show slave status").fetch_hash
-      down_at = memory(:down_at)
+      
       if h.nil?
         error("Replication not configured")
-      elsif h["Seconds_Behind_Master"].nil? and !down_at
-        unless in_ignore_window?
-          alert("Replication not running", alert_body(h)) 
-          down_at = Time.now
-        end
       elsif h["Slave_IO_Running"] == "Yes" and h["Slave_SQL_Running"] == "Yes"
+        res["Replication Running"] = 1
+        
+        if h["Seconds_Behind_Master"]
+          res["Seconds Behind Master"] = h["Seconds_Behind_Master"]
+        end
+
         if down_at
           alert("Replication running again","Replication was not running for #{(Time.now - down_at).to_i} seconds")
           down_at = nil
         end
-      elsif !down_at
-        unless in_ignore_window?
-          alert("Replication not running", alert_body(h)) 
-          down_at = Time.now
+      else
+        if in_ignore_window?
+          res["Replication Running"] = 1
+        elsif !down_at
+          consecutive_failures += 1
+          
+          if consecutive_failures >= alert_threshold
+            alert("Replication not running", alert_body(h)) 
+            down_at = Time.now
+          end
+          
+          remember(:consecutive_failures, consecutive_failures)
         end
       end
-      report("Seconds Behind Master" => h["Seconds_Behind_Master"]) if h && h["Seconds_Behind_Master"]
+
       remember(:down_at, down_at)
     rescue Mysql::Error => e
       error("Unable to connect to MySQL", e.to_s)
     end
+    
+    report(res)
   end
 
   def in_ignore_window?
